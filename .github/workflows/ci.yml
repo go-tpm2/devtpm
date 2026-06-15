@@ -1,6 +1,14 @@
 # go-tpm2/devtpm CI — vet, gofmt, 100%-coverage gate, and a multi-arch
-# build matrix, on every push/PR. This is a pure-Go (CGO=0) module that is
-# NOT part of any workspace, so every Go invocation runs with GOWORK=off.
+# build+TEST matrix, on every push/PR. This is a pure-Go (CGO=0) module
+# that is NOT part of any workspace, so every Go invocation runs with
+# GOWORK=off.
+#
+# Tests RUN on all SIX 64-bit targets the go-tpm2 stack supports —
+# amd64, arm64 natively; riscv64, loong64, ppc64le, s390x under QEMU.
+# s390x is big-endian and exercises the common big-endian TPM 2.0 codec,
+# so it is a first-class validation target, not a smoke check. The test
+# suite uses an in-memory fake ReadWriteCloser and temp files, so it
+# needs no real /dev/tpm* device and runs cleanly under emulation.
 
 name: ci
 
@@ -54,14 +62,18 @@ jobs:
           awk -v p="$pct" 'BEGIN { exit !(p+0 >= 100.0) }' || {
             echo "::error::coverage ${pct}% < 100.0%"; exit 1; }
 
-  build:
-    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
-    runs-on: ubuntu-latest
+  # Native test on the two arches GitHub-hosted runners provide directly.
+  native:
+    name: test (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
-        goos: [linux]
-        goarch: [amd64, arm64, riscv64, loong64]
+        include:
+          - arch: amd64
+            runs-on: ubuntu-latest
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
 
@@ -70,10 +82,76 @@ jobs:
           go-version: stable
           check-latest: true
 
-      # Prove the package compiles cleanly on every 64-bit target the
-      # go-tpm2 stack supports — no arch-specific breakage slips in.
-      - name: go build
+      - run: go version
+
+      - name: test
+        run: go test ./...
+
+  # Emulated test on the four arches without hosted runners. Test
+  # binaries are cross-compiled per package (CGO=0) and executed under
+  # QEMU via docker, with QEMU_CPU selecting a representative core so
+  # arch-specific code paths (e.g. RVV on riscv64) are actually exercised.
+  emulated:
+    name: test (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: riscv64
+            image: debian:trixie
+            qemu_cpu: rv64,v=true,vlen=128
+          - arch: loong64
+            goarch: loong64
+            image: ghcr.io/loong64/debian:trixie
+            qemu_cpu: la464
+          - arch: ppc64le
+            image: debian:trixie
+            qemu_cpu: power9
+          - arch: s390x
+            image: debian:trixie
+            qemu_cpu: qemu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+
+      - run: go version
+
+      - name: register binfmt handlers
+        run: docker run --privileged --rm tonistiigi/binfmt --install all
+
+      # Cross-compile a cover-instrumented test binary per package, then
+      # run each under QEMU. GOARCH maps the matrix arch to Go's name
+      # (loong64's docker platform is "loong64" so they coincide here).
+      - name: cross-compile + run tests under QEMU
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: go build ./...
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          DOCKER_IMAGE: ${{ matrix.image }}
+          QEMU_CPU: ${{ matrix.qemu_cpu }}
+        run: |
+          set -euo pipefail
+          mkdir -p _qemu
+          # docker platform string for the run (Go and OCI arch names
+          # coincide for all six targets here).
+          platform="linux/${GOARCH}"
+          fail=0
+          for pkg in $(go list ./...); do
+            bin="_qemu/$(echo "$pkg" | tr '/' '_').test"
+            # -cover keeps parity with the coverage gate; no fuzzing
+            # under emulation.
+            go test -c -cover -o "$bin" "$pkg"
+            # Some packages may have no test files -> no binary emitted.
+            [ -f "$bin" ] || { echo "no test binary for $pkg (skipping)"; continue; }
+            echo "::group::$pkg ($GOARCH under $QEMU_CPU)"
+            docker run --rm --platform "$platform" \
+              -e QEMU_CPU="$QEMU_CPU" \
+              -v "$PWD:/w" -w /w "$DOCKER_IMAGE" \
+              "/w/$bin" -test.v || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
