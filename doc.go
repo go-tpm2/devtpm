@@ -32,6 +32,14 @@
 // harness uses exactly that to exercise this transport against a real
 // swtpm on a host that has no /dev/tpmrm0.
 //
+// # Windows
+//
+// On GOOS=windows, OpenTBS returns a TBS transport over Windows TPM Base
+// Services (tbs.dll): Tbsi_Context_Create with TBS_CONTEXT_PARAMS2 for a
+// TPM 2.0, Tbsip_Submit_Command at locality 0 and normal priority,
+// Tbsip_Context_Close. TBS result codes are TBSError values. The TBS type
+// and TBSError are portable, so they are testable on every platform.
+//
 // # Security and usage (weft attestation)
 //
 // This is the node-side host-TPM transport for weft remote attestation.

@@ -1,2 +1,4 @@
 github.com/go-tpm2/common v0.3.0 h1:Ay8fA+z4hl6Ldw+IUVEMXEcyqFXWevRDsoSoT2HMGQM=
 github.com/go-tpm2/common v0.3.0/go.mod h1:KZ+rdlHaBGCV+WGaqxRE+LOwzKPEYzHc5SetpKtWPf8=
+golang.org/x/sys v0.50.0 h1:dkKZEFTEKaLr1sjhs0WiKqoi8Jj5nHbS3Njmx1UoMJs=
+golang.org/x/sys v0.50.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
