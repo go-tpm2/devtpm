@@ -97,6 +97,39 @@ rsp, err := dev.Send(cmd) // common.Transport.Send
 Underlying read/write errors are returned unwrapped so callers can inspect
 the concrete `os`/`syscall` error.
 
+## Windows: TPM Base Services (`TBS`)
+
+On Windows a user process reaches the TPM only through TBS (`tbs.dll`).
+`devtpm.OpenTBS()` (`GOOS=windows`, pure Go through `golang.org/x/sys/windows`,
+no cgo) creates a TBS context for a TPM 2.0 and returns a `*devtpm.TBS`, a
+`common.Transport`:
+
+```go
+tr, err := devtpm.OpenTBS()
+if errors.Is(err, devtpm.TBSErrTPMNotFound) {
+    // no TPM 2.0 on this machine
+}
+defer tr.Close()
+tpm := tpm2.New(tr)
+```
+
+- `Tbsi_Context_Create` with `TBS_CONTEXT_PARAMS2` (`TPM_VERSION_20`,
+  `includeTpm20`), `Tbsip_Submit_Command` at locality 0 and normal priority,
+  `Tbsip_Context_Close`.
+- TBS result codes are returned as `TBSError` (comparable; every code of
+  Microsoft's TBS return-code table has a constant, `TBSErrTPMNotFound`,
+  `TBSErrServiceDisabled`, `TBSErrAccessDenied`, ...). A command the TPM
+  itself rejects is not a TBS error: its response code is in the returned
+  bytes, as with the other transports.
+- A response larger than the 4096-byte buffer is retried once at the size TBS
+  asks for, capped at 64 KiB.
+- TBS is the resource manager: closing the context flushes its transient
+  objects and sessions, as `/dev/tpmrm0` does.
+
+Measured on Windows 11 (ARM64, QEMU, no TPM): the real `tbs.dll` accepts the
+context parameters and answers `TBS_E_TPM_NOT_FOUND`, which `OpenTBS` returns.
+A TPM round trip has not been measured.
+
 ## Security
 
 `/dev/tpmrm0` is privileged (root or the `tss` group). Any process that can
@@ -118,6 +151,8 @@ BSD-3-Clause, 100% statement coverage (`GOWORK=off go test -cover`),
   / one-read-one-response framing) and `tpm2-space.c` (the `/dev/tpmrm0`
   in-kernel resource manager).
 - TCG TPM 2.0 Library, Parts 1–4 (wire format, via `common`).
+- Microsoft Learn, TBS: `Tbsi_Context_Create`, `TBS_CONTEXT_PARAMS2`,
+  `Tbsip_Submit_Command`, `Tbsip_Context_Close`, "TBS Return Codes".
 
 ## License
 

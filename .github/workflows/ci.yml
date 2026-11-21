@@ -62,6 +62,37 @@ jobs:
           awk -v p="$pct" 'BEGIN { exit !(p+0 >= 100.0) }' || {
             echo "::error::coverage ${pct}% < 100.0%"; exit 1; }
 
+  # The Windows TBS transport: vet for every Windows arch, then the real
+  # test suite on a Windows runner (no TPM there: the real tbs.dll must
+  # answer TBS_E_TPM_NOT_FOUND), with the same 100% gate.
+  windows:
+    name: windows (tbs)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+          check-latest: true
+
+      - name: vet (windows amd64, arm64, 386)
+        run: |
+          GOARCH=amd64 go vet ./...
+          GOARCH=arm64 go vet ./...
+          GOARCH=386 go vet ./...
+
+      - name: test + coverage gate (100%)
+        run: |
+          go test -coverprofile=cover.out ./...
+          pct=$(go tool cover -func=cover.out | tail -n 1 | awk '{print $3}' | tr -d '%')
+          echo "total coverage: ${pct}%"
+          awk -v p="$pct" 'BEGIN { exit !(p+0 >= 100.0) }' || {
+            echo "::error::coverage ${pct}% < 100.0%"; exit 1; }
+
   # Native test on the two arches GitHub-hosted runners provide directly.
   native:
     name: test (${{ matrix.arch }})
