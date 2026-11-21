@@ -121,6 +121,8 @@ tpm := tpm2.New(tr)
   `TBSErrServiceDisabled`, `TBSErrAccessDenied`, ...). A command the TPM
   itself rejects is not a TBS error: its response code is in the returned
   bytes, as with the other transports.
+- Off Windows `OpenTBS` exists too and returns `ErrTBSUnsupported`, so a
+  caller can name the TBS device on every platform without a build tag.
 - A response larger than the 4096-byte buffer is retried once at the size TBS
   asks for, capped at 64 KiB.
 - TBS is the resource manager: closing the context flushes its transient
